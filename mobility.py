@@ -492,7 +492,7 @@ def topology(num_cars, sumo_config_file, flood_type, duration, rate_mbps, unicas
         car = net.addCar(f'car{id + 1}', cls=CustomCar, wlans=2, encrypt=['wpa2', ''])  # Two interfaces per car
 
     info("*** Configuring Propagation Model\n")
-    net.setPropagationModel(model="logDistance", exp=2.8)
+    net.setPropagationModel(model="friis", exp=2.0)
 
     info("*** Configuring nodes\n")
     net.configureNodes()
