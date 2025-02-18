@@ -10,7 +10,7 @@ from scapy.all import sniff, Dot11
 import re
 from scipy.special import gamma
  
-# Ensure SUMO_HOME is set
+# Ensure SUMO_HOME environment variable is set for SUMO simulation tool
 if 'SUMO_HOME' not in os.environ:
     os.environ['SUMO_HOME'] = "/usr/share/sumo"
  
@@ -18,16 +18,16 @@ sys.path.append(os.path.join(os.environ['SUMO_HOME'], 'tools'))
  
 import pytz
 import datetime
-import traci
-from mininet.log import setLogLevel, info
-from mn_wifi.cli import CLI
-from mn_wifi.net import Mininet_wifi
-from mn_wifi.sumo.runner import sumo
-from mn_wifi.link import wmediumd, mesh
-from mn_wifi.wmediumdConnector import interference
-from mn_wifi.node import Car
+import traci  # Interface with the SUMO traffic simulator
+from mininet.log import setLogLevel, info  # Logging utilities from Mininet
+from mn_wifi.cli import CLI  # Command-line interface for Mininet-WiFi
+from mn_wifi.net import Mininet_wifi  # Network topology builder for Mininet-WiFi
+from mn_wifi.sumo.runner import sumo  # Integration with SUMO
+from mn_wifi.link import wmediumd, mesh  # Wireless medium configuration and mesh networking
+from mn_wifi.wmediumdConnector import interference  # Interference model for wireless links
+from mn_wifi.node import Car  # Car node implementation in Mininet-WiFi
  
-# MCS tables for different IEEE 802.11 standards, including 802.11bd
+# MCS (Modulation and Coding Scheme) tables for different IEEE 802.11 standards, including 802.11bd
 mcs_tables = {
     '802.11a': [
         ('BPSK', 6.0), ('BPSK', 9.0),
@@ -100,6 +100,7 @@ mcs_tables = {
     ]
 }
  
+# Function to check if a network interface exists
 def interface_exists(interface):
     try:
         subprocess.check_output(['ip', 'link', 'show', interface], stderr=subprocess.STDOUT)
@@ -107,6 +108,7 @@ def interface_exists(interface):
     except subprocess.CalledProcessError:
         return False
  
+# Function to retrieve wireless information of a network interface using 'iw' command
 def get_wireless_info(interface, retries=3, delay=2):
     for attempt in range(retries):
         if interface_exists(interface):
@@ -121,6 +123,7 @@ def get_wireless_info(interface, retries=3, delay=2):
             time.sleep(delay)
     return None
  
+# Function to parse the wireless standard (e.g., 802.11p, 802.11ac) from 'iw' command output
 def parse_wireless_standard(iw_output):
     """Parse the wireless standard from iw command output."""
     standard = None
@@ -143,6 +146,7 @@ def parse_wireless_standard(iw_output):
     
     return standard
  
+# Function to parse the MCS (Modulation and Coding Scheme) index from 'iw' command output
 def parse_mcs_index(iw_output):
     """Parse the MCS index from iw command output."""
     mcs_index = None
@@ -153,6 +157,7 @@ def parse_mcs_index(iw_output):
         mcs_index = 7  # Default MCS index to 7 for demonstration if not explicitly found
     return mcs_index
  
+# Function to determine the modulation scheme and data rate based on the interface and IEEE standard
 def get_modulation_and_datarate(interface, ieee_standard):
     mcs_table = mcs_tables.get(ieee_standard)
     if not mcs_table:
@@ -185,6 +190,7 @@ def get_modulation_and_datarate(interface, ieee_standard):
     else:
         return 'N/A', 'N/A'
  
+# Function to get the current date and time formatted according to Asia/Jakarta timezone
 def getdatetime():
     """Get current date and time formatted."""
     utc_now = pytz.utc.localize(datetime.datetime.utcnow())
@@ -192,13 +198,15 @@ def getdatetime():
     DATIME = currentDT.strftime("%Y-%m-%d %H:%M:%S")
     return DATIME
  
+# Function to calculate the subnet mask based on the number of nodes
 def calculate_subnet_mask(number_of_nodes):
     """Calculate subnet mask based on the number of nodes."""
-    number_of_ips_needed = number_of_nodes + 2
+    number_of_ips_needed = number_of_nodes + 2  # Add 2 for network and broadcast addresses
     bits_needed_for_hosts = math.ceil(math.log2(number_of_ips_needed))
     subnet_mask = 32 - bits_needed_for_hosts
     return subnet_mask
  
+# Function to calculate communication range based on transmission power using Free Space Path Loss model
 def calculate_communication_range(tx_power_dbm, frequency_mhz=2400, threshold_dbm=-90):
     """
     Calculate the communication range based on the transmission power using the Free Space Path Loss (FSPL) model.
@@ -207,12 +215,13 @@ def calculate_communication_range(tx_power_dbm, frequency_mhz=2400, threshold_db
     :param threshold_dbm: Receive sensitivity threshold in dBm (default is -90 dBm).
     :return: Communication range in meters.
     """
-    tx_power_watts = 10 ** (tx_power_dbm / 10) / 1000
-    threshold_watts = 10 ** (threshold_dbm / 10) / 1000
-    lambda_m = 300 / frequency_mhz
-    range_m = (lambda_m / (4 * math.pi)) * math.sqrt(tx_power_watts / threshold_watts)
+    tx_power_watts = 10 ** (tx_power_dbm / 10) / 1000  # Convert dBm to Watts
+    threshold_watts = 10 ** (threshold_dbm / 10) / 1000  # Convert dBm to Watts
+    lambda_m = 300 / frequency_mhz  # Wavelength in meters
+    range_m = (lambda_m / (4 * math.pi)) * math.sqrt(tx_power_watts / threshold_watts)  # FSPL formula
     return range_m
  
+# Function to check if two cars are within communication range based on their transmission power
 def is_within_reach(car1, car2):
     """Check if two cars are within the communication range of each other based on transmission power."""
     x1, y1 = car1.params.get('position', (0, 0))
@@ -227,6 +236,7 @@ def is_within_reach(car1, car2):
  
     return distance <= range_car1 and distance <= range_car2
  
+# Function to start packet capture using tcpdump
 def start_tcpdump(pcap_file):
     """Start tcpdump to capture packets."""
     cmd = ["tcpdump", "-i", "any", "-w", pcap_file]
@@ -234,25 +244,30 @@ def start_tcpdump(pcap_file):
     process = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     return process
  
+# Function to stop tcpdump process
 def stop_tcpdump(process):
     """Stop tcpdump process."""
     if process:
         process.terminate()
  
+# Function to calculate the communication range based on an extended model
 def calculate_r_cs(S, p, beta, m, wavelength):
     A = ((4 * math.pi) / wavelength) ** 2
     r_cs = gamma(m + 1/beta) / (gamma(m) * (S * A * (m/p)) ** (1/beta))
     return r_cs
  
+# Function to calculate the coded bits rate
 def calculate_C(c_d, b_st, n, t_ps):
     # Correctly implementing the C formula based on the provided equation
     C = (c_d * math.ceil((b_st + n) / c_d) + t_ps) ** -1
     return C
  
+# Function to calculate Channel Busy Ratio (CBR)
 def calculate_CBR(r_cs, rho, b, C):
     CBR = (2 * r_cs * rho * b) / C
     return CBR
  
+# Custom car class that extends the standard Car class
 class CustomCar(Car):
     def __init__(self, name, **params):
         super().__init__(name, **params)
@@ -261,9 +276,11 @@ class CustomCar(Car):
         self.data_rate = None
         self.beacon_rate = None
  
+    # Update the neighbor information for the car
     def update_neighbor_info(self, neighbor_id, info):
         self.neighbors_info[neighbor_id] = info
  
+# Function to find neighbors of a car based on position
 def find_neighbors_position(car, net, check_range):
     """Find neighbors of a car based on position."""
     neighbors = []
@@ -272,6 +289,7 @@ def find_neighbors_position(car, net, check_range):
             neighbors.append(target_car.name)
     return neighbors
  
+# Function to find neighbors of a car based on beacon replies
 def find_neighbors_beacon(car, net, check_range):
     """Find neighbors of a car based on beacon replies."""
     neighbors = []
@@ -280,6 +298,7 @@ def find_neighbors_beacon(car, net, check_range):
             neighbors.append(target_car.name)
     return neighbors
  
+# Function to send beacon packets at a specified rate with range checking
 def send_beacon(car, beacon_rate, net, check_range, range_detection_method, ieee_standard):
     """Send beacon packets at the specified rate with range checking."""
     if range_detection_method == 'position':
@@ -309,11 +328,13 @@ def send_beacon(car, beacon_rate, net, check_range, range_detection_method, ieee
         target_car = net.getNodeByName(neighbor)
         target_car.update_neighbor_info(car.name, beacon_info)
  
+# Function to receive beacon information from a neighbor car
 def receive_beacon(car, beacon_info):
     """Receive beacon information from a neighbor car."""
     neighbor_id = beacon_info['car_id']
     car.update_neighbor_info(neighbor_id, beacon_info)
  
+# Function to send a flood of ping packets to simulate an attack
 def ping_flood(source, target_ip):
     """Send a flood of ping packets."""
     cmd = ["ping", "-i", "0.01", target_ip]
@@ -321,6 +342,7 @@ def ping_flood(source, target_ip):
     if result.returncode == 0:
         info(f"Successfully sent ping flood from {source.name} to {target_ip}")
  
+# Function to perform flooding attacks between cars in the network
 def flood_all(net, flood_type, rate_mbps=1, unicast=True, check_range=True):
     """Perform flooding attack between cars."""
     def flood_car(car1, car2):
@@ -339,6 +361,7 @@ def flood_all(net, flood_type, rate_mbps=1, unicast=True, check_range=True):
     for thread in threads:
         thread.join()
  
+# Function to set up a socket connection to a server for logging purposes
 def setup_socket_connection(server_ip, server_port):
     """Setup a socket connection to the server."""
     socket_client = None
@@ -350,6 +373,7 @@ def setup_socket_connection(server_ip, server_port):
         socket_client = None
     return socket_client
  
+# Function to log data for each car, supporting multiple logging options (stdout, CSV, socket)
 def log_data(timestamp, car, log_options, csv_writer=None, socket_client=None):
     """Log data for each car. Supports multiple logging options."""
     car_data = {
@@ -376,6 +400,7 @@ def log_data(timestamp, car, log_options, csv_writer=None, socket_client=None):
     if 'socket' in log_options and socket_client:
         socket_client.sendall(str(car_data).encode('utf-8'))
  
+    # Log neighbor data
     for neighbor_id, neighbor_info in car.neighbors_info.items():
         neighbor_data = {
             'timestamp': timestamp,
@@ -398,6 +423,7 @@ def log_data(timestamp, car, log_options, csv_writer=None, socket_client=None):
         if 'socket' in log_options and socket_client:
             socket_client.sendall(str(neighbor_data).encode('utf-8'))
  
+# Main data logging function that also handles flooding attacks and simulation steps
 def data_logging(net, flood_type, data_collection_interval=1, duration=60, rate_mbps=1, 
                  dump_packets=True, log_options=None, unicast=True, check_range=True, 
                  enable_beacon=True, beacon_rate=10, enable_cbr=False, range_detection_method='position', 
@@ -417,10 +443,10 @@ def data_logging(net, flood_type, data_collection_interval=1, duration=60, rate_
         csv_writer.writeheader()
  
     while time.time() - start_time < duration:
-        traci.simulationStep()
+        traci.simulationStep()  # Advance the SUMO simulation by one step
         
-        timestamp = getdatetime()
-        vehicles = traci.vehicle.getIDList()
+        timestamp = getdatetime()  # Get the current timestamp
+        vehicles = traci.vehicle.getIDList()  # Get the list of vehicle IDs in SUMO
         
         for vehicle_id in vehicles:
             vehicle_id_str = f'car{int(float(vehicle_id)) + 1}'
@@ -438,7 +464,7 @@ def data_logging(net, flood_type, data_collection_interval=1, duration=60, rate_
             power_transmission = car.wintfs[0].txpower
             modulation, data_rate = get_modulation_and_datarate(car.wintfs[0].name, ieee_standard)
             
-            # Define the constants
+            # Define the constants for communication calculations
             S = 1e-10  # Sensitivity threshold in Watts
             beta = 3   # Path loss exponent
             m = 1      # Shape parameter
@@ -449,6 +475,7 @@ def data_logging(net, flood_type, data_collection_interval=1, duration=60, rate_
             t_ps = 40e-6  # Preamble and signal field duration in seconds (e.g., 40 microseconds)
             rho = len(find_neighbors_position(car, net, check_range)) + 1  # Number of sensed neighbors including the vehicle itself
  
+            # Calculate channel busy rate (CBR)
             r_cs = calculate_r_cs(S, power_transmission, beta, m, wavelength)
             C = calculate_C(c_d, b_st, n, t_ps)
             cbr = calculate_CBR(r_cs, rho, beacon_rate, C) if enable_cbr else "N/A"
@@ -471,11 +498,12 @@ def data_logging(net, flood_type, data_collection_interval=1, duration=60, rate_
     if log_options and 'csv' in log_options and csv_file:
         csv_file.close()
  
-    traci.close()
-    net.stop()
-    subprocess.run(["mn", "-c"])
-    sys.exit(0)
+    traci.close()  # Close the SUMO interface
+    net.stop()  # Stop the Mininet-WiFi network
+    subprocess.run(["mn", "-c"])  # Clean up Mininet resources
+    sys.exit(0)  # Exit the script
  
+# Function to set up the network topology and start the simulation
 def topology(num_cars, sumo_config_file, flood_type, duration, rate_mbps, unicast=True,
              check_range=True, dump_packets=True, log_options=None, enable_beacon=True, 
              beacon_rate=10, enable_cbr=False, range_detection_method='beacon', 
