@@ -5,6 +5,7 @@ import time
 import subprocess
 import csv
 import socket
+import json
 from threading import Thread
 from scapy.all import sniff, Dot11
 import re
@@ -151,8 +152,7 @@ def parse_mcs_index(iw_output):
         mcs_index = int(match.group(1))
     else:
         mcs_index = 7  # Default MCS index to 7 for demonstration if not explicitly found
-    return mcs_index
- 
+    return mcs_index 
 def get_modulation_and_datarate(interface, ieee_standard):
     mcs_table = mcs_tables.get(ieee_standard)
     if not mcs_table:
@@ -276,7 +276,7 @@ def find_neighbors_beacon(car, net, check_range):
     """Find neighbors of a car based on beacon replies."""
     neighbors = []
     for target_car in net.cars:
-        if car != target_car and (not check_range or is_within_reach(car, target_car)):
+        if car != target_car and not check_range or is_within_reach(car, target_car):
             neighbors.append(target_car.name)
     return neighbors
  
@@ -369,12 +369,12 @@ def log_data(timestamp, car, log_options, csv_writer=None, socket_client=None):
         csv_writer.writerow(car_data)
  
     # Log to stdout if selected
-    if 'stdout' in log_options:
-        print(car_data)
+    #if 'stdout' in log_options:
+        #print(car_data)
  
     # Log to socket if selected
     if 'socket' in log_options and socket_client:
-        socket_client.sendall(str(car_data).encode('utf-8'))
+        socket_client.sendall(json.dumps(car_data).encode('utf-8'))
  
     for neighbor_id, neighbor_info in car.neighbors_info.items():
         neighbor_data = {
@@ -393,10 +393,10 @@ def log_data(timestamp, car, log_options, csv_writer=None, socket_client=None):
         # Log neighbor data to the selected options
         if 'csv' in log_options and csv_writer:
             csv_writer.writerow(neighbor_data)
-        if 'stdout' in log_options:
-            print(neighbor_data)
+        #if 'stdout' in log_options:
+            #print(neighbor_data)
         if 'socket' in log_options and socket_client:
-            socket_client.sendall(str(neighbor_data).encode('utf-8'))
+            socket_client.sendall(json.dumps(neighbor_data).encode('utf-8'))
  
 def data_logging(net, flood_type, data_collection_interval=1, duration=60, rate_mbps=1, 
                  dump_packets=True, log_options=None, unicast=True, check_range=True, 
@@ -415,7 +415,7 @@ def data_logging(net, flood_type, data_collection_interval=1, duration=60, rate_
         fieldnames = ['timestamp', 'car_id', 'position', 'speed', 'power_transmission', 'modulation', 'data_rate', 'beacon_rate', 'channel_busy_rate', 'neighbor_id']
         csv_writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
         csv_writer.writeheader()
- 
+
     while time.time() - start_time < duration:
         traci.simulationStep()
         
@@ -465,16 +465,16 @@ def data_logging(net, flood_type, data_collection_interval=1, duration=60, rate_
         if run_flood:
             flood_all(net, flood_type, rate_mbps, unicast, check_range)
  
-    if dump_packets:
-        stop_tcpdump(tcpdump_process)
+    #if dump_packets:
+        #stop_tcpdump(tcpdump_process)
  
     if log_options and 'csv' in log_options and csv_file:
         csv_file.close()
  
-    traci.close()
-    net.stop()
-    subprocess.run(["mn", "-c"])
-    sys.exit(0)
+    #traci.close()
+    #net.stop()
+    #subprocess.run(["mn", "-c"])
+    #sys.exit(0)
  
 def topology(num_cars, sumo_config_file, flood_type, duration, rate_mbps, unicast=True,
              check_range=True, dump_packets=True, log_options=None, enable_beacon=True, 
@@ -529,9 +529,9 @@ def topology(num_cars, sumo_config_file, flood_type, duration, rate_mbps, unicas
                  enable_beacon=enable_beacon, beacon_rate=beacon_rate, enable_cbr=enable_cbr, 
                  range_detection_method=range_detection_method, ieee_standard=ieee_standard, 
                  run_flood=run_flood, socket_client=socket_client)
- 
-    info("*** Stopping network\n")
-    sumo_process.terminate()
+    
+    #info("*** Stopping network\n")
+    #sumo_process.terminate()
  
     if socket_client:
         socket_client.close()
@@ -542,11 +542,11 @@ def topology(num_cars, sumo_config_file, flood_type, duration, rate_mbps, unicas
  
 if __name__ == '__main__':
     setLogLevel('info')
-    num_cars = 40  # Default number of cars
+    num_cars = 2  # Default number of cars
     flood_type = 'ping'  # Choose from 'syn', 'ack', 'udp', or 'ping'
-    duration = 600  # Duration of the simulation in seconds
+    duration = 100  # Duration of the simulation in seconds
     rate_mbps = 1  # Rate of flooding attack in Mbps
-    sumo_config_file = 'manhattangrid.sumocfg'  # SUMO configuration file
+    sumo_config_file = 'sumocfg/6lane.sumocfg'  # SUMO configuration file
  
     # Configuration flags
     unicast = True  # True for unicast, False for broadcast
@@ -565,4 +565,3 @@ if __name__ == '__main__':
     topology(num_cars, sumo_config_file, flood_type, duration, rate_mbps, unicast, check_range, dump_packets, 
              log_options, enable_beacon, beacon_rate, enable_cbr, range_detection_method, ieee_standard, 
              run_flood, server_ip, server_port)
-
