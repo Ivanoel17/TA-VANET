@@ -162,9 +162,9 @@ class Server:
         self.apply_optimized_settings(car_log['car_id'], new_beacon_rate, new_power_transmission)
  
     def apply_optimized_settings(self, car_id, beacon_rate, power_transmission):
-        #if not self.net:
-            #print("[ERROR] Network object is not initialized in apply_optimized_settings.")
-            #return
+        if not self.net:
+            print("[ERROR] Network object is not initialized in apply_optimized_settings.")
+            return
  
         try:
             car = self.net.getNodeByName(car_id)
