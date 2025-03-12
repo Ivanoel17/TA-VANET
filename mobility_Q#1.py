@@ -371,7 +371,7 @@ def setup_socket_connection(server_ip, server_port):
         socket_client = None
     return socket_client
  
-def log_data(timestamp, car, net, log_options, csv_writer=None, socket_client=None):
+def log_data(timestamp, car, vehicle_id, net, log_options, csv_writer=None, socket_client=None):
     """Log data for each car. Supports multiple logging options."""
     car_data = {
         'timestamp': timestamp,
@@ -396,7 +396,35 @@ def log_data(timestamp, car, net, log_options, csv_writer=None, socket_client=No
  
     # Log to socket if selected
     if 'socket' in log_options and socket_client:
+        # Send car data to server
         socket_client.sendall(json.dumps(car_data).encode('utf-8'))
+            
+        # Receive optimized parameters
+        response = socket_client.recv(4096).decode('utf-8')
+        optimized_params = json.loads(response)
+            
+        # Apply optimized settings using net object
+        car_node = net.getNodeByName(optimized_params['car_id'])
+        if car_node:
+            #car_node.setParam({"beacon_rate": optimized_params['beacon_rate']})
+            #car_node.setParam({"txpower": optimized_params['power_transmission']})
+            car_node.wintfs[0].config(
+                beacon_rate=optimized_params['beacon_rate'],
+                txpower=optimized_params['power_transmission']
+            )
+            
+            traci.vehicle.setParameter(
+                vehicle_id,
+                "beaconRate",
+                str(optimized_params['beacon_rate'])
+            )
+            traci.vehicle.setParameter(
+                vehicle_id,
+                "txpower",
+                str(optimized_params['power_transmission'])
+            )
+            print(f"Applied settings to {optimized_params['car_id']}")
+        
  
     for neighbor_id, neighbor_info in car.neighbors_info.items():
         neighbor_data = {
@@ -413,12 +441,12 @@ def log_data(timestamp, car, net, log_options, csv_writer=None, socket_client=No
         }
  
         # Log neighbor data to the selected options
-        if 'csv' in log_options and csv_writer:
-            csv_writer.writerow(neighbor_data)
+        #if 'csv' in log_options and csv_writer:
+            #csv_writer.writerow(neighbor_data)
         if 'stdout' in log_options:
             print(neighbor_data)
-        if 'socket' in log_options and socket_client:
-            socket_client.sendall(json.dumps(neighbor_data).encode('utf-8'))
+        #if 'socket' in log_options and socket_client:
+            #socket_client.sendall(json.dumps(neighbor_data).encode('utf-8'))
  
  
 def data_logging(net, flood_type, data_collection_interval=1, duration=60, rate_mbps=1, 
@@ -449,12 +477,14 @@ def data_logging(net, flood_type, data_collection_interval=1, duration=60, rate_
         
         timestamp = getdatetime()
         vehicles = traci.vehicle.getIDList()
+        print("No:", vehicles) # debugging
         
         for vehicle_id in vehicles:
             vehicle_id_str = f'car{int(float(vehicle_id)) + 1}'
-            
+            print("No:", vehicle_id_str) # debugging
             try:
                 car = net.getNodeByName(vehicle_id_str)
+                print(car)
             except KeyError:
                 continue
  
@@ -482,7 +512,8 @@ def data_logging(net, flood_type, data_collection_interval=1, duration=60, rate_
             if enable_beacon:
                 send_beacon(car, beacon_rate, net, check_range, range_detection_method, ieee_standard)
             
-            log_data(timestamp, car, net, log_options, csv_writer, socket_client)  # Pass net as an argument
+            print("No:", vehicle_id) # debugging
+            log_data(timestamp, car, vehicle_id, net, log_options, csv_writer, socket_client)  # Pass net as an argument
         
         time.sleep(data_collection_interval)
         
@@ -574,7 +605,7 @@ def topology(num_cars, sumo_config_file, flood_type, duration, rate_mbps, unicas
  
 if __name__ == '__main__':
     setLogLevel('info')
-    num_cars = 40  # Default number of cars
+    num_cars = 10  # Default number of cars
     flood_type = 'ping'  # Choose from 'syn', 'ack', 'udp', or 'ping'
     duration = 600  # Duration of the simulation in seconds
     rate_mbps = 1  # Rate of flooding attack in Mbps
@@ -586,7 +617,7 @@ if __name__ == '__main__':
     dump_packets = True  # True to dump packets, False to skip
     log_options = ['stdout', 'csv', 'socket']  # Multiple logging options allowed
     server_ip = '127.0.0.1'  # IP address of the server for socket logging
-    server_port = 9999  # Port of the server for socket logging
+    server_port = 5000  # Port of the server for socket logging
     enable_beacon = True  # True to enable beacon communication, False to disable
     beacon_rate = 10  # Beacon rate in Hz
     enable_cbr = True  # True to calculate channel busy rate, False to skip
@@ -598,4 +629,3 @@ if __name__ == '__main__':
              log_options, enable_beacon, beacon_rate, enable_cbr, range_detection_method, ieee_standard, 
              run_flood, server_ip, server_port)
  
-

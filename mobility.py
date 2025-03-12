@@ -369,8 +369,8 @@ def log_data(timestamp, car, log_options, csv_writer=None, socket_client=None):
         csv_writer.writerow(car_data)
  
     # Log to stdout if selected
-    #if 'stdout' in log_options:
-        #print(car_data)
+    if 'stdout' in log_options:
+        print(car_data)
  
     # Log to socket if selected
     if 'socket' in log_options and socket_client:
@@ -542,7 +542,7 @@ def topology(num_cars, sumo_config_file, flood_type, duration, rate_mbps, unicas
  
 if __name__ == '__main__':
     setLogLevel('info')
-    num_cars = 2  # Default number of cars
+    num_cars = 10  # Default number of cars
     flood_type = 'ping'  # Choose from 'syn', 'ack', 'udp', or 'ping'
     duration = 100  # Duration of the simulation in seconds
     rate_mbps = 1  # Rate of flooding attack in Mbps
