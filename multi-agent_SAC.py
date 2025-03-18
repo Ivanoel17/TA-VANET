@@ -1,149 +1,245 @@
-import os
-import sys
+import socket
+import json
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from gym import spaces, Env
-from maddpg import MADDPG
-from collections import namedtuple
- 
-# Ensure SUMO_HOME is set for the SUMO traffic simulation tool
-if 'SUMO_HOME' not in os.environ:
-    os.environ['SUMO_HOME'] = "/usr/share/sumo"
-sys.path.append(os.path.join(os.environ['SUMO_HOME'], 'tools'))
- 
-import traci  # TraCI control of SUMO
- 
-# Define the VANET Environment for Cooperative Multi-Agent Learning
-class VANETEnv(Env):
-    def __init__(self, car_logs, num_agents=3, ieee_standard='802.11p', bandwidth=20):
-        super(VANETEnv, self).__init__()
-        
-        self.num_agents = num_agents
-        self.ieee_standard = ieee_standard
-        self.bandwidth = bandwidth
-        
-        # Action space: [Power, Data rate, Beacon rate] for each agent
-        self.action_space = [spaces.Box(low=np.array([-3, -3, -3]), high=np.array([3, 3, 3]), dtype=np.float32) for _ in range(self.num_agents)]
-        # Observation space: [Power, Data rate, Beacon rate, Vehicle density, SNR] for each agent
-        self.observation_space = [spaces.Box(low=np.array([1, 1, 1, 0.001, 0]), high=np.array([30, 30, 20, 0.8, 100]), dtype=np.float32) for _ in range(self.num_agents)]
-        
-        self.car_logs = car_logs  # Logs to initialize the state
-        self.state = None  # Current state of the environment
-        self.CBR_target = 0.6  # Target CBR value
-        self.SNR_target = 15.0  # Target SNR value
-        
-    def reset(self):
-        # Randomly initialize the state for each agent
-        self.state = [self._get_initial_state() for _ in range(self.num_agents)]
-        return self.state
-    
-    def step(self, actions):
-        rewards = []
-        next_states = []
-        
-        for i, action in enumerate(actions):
-            power, data_rate, beacon_rate = self.state[i][:3]
-            vehicle_density = self.state[i][3]
-            
-            # Apply action adjustments
-            new_power = np.clip(power + action[0], 1, 30)
-            new_data_rate = np.clip(data_rate + action[1], 1, 30)
-            new_beacon_rate = np.clip(beacon_rate + action[2], 1, 20)
-            
-            # Calculate new SNR considering the impact of neighboring vehicles
-            new_snr = self.calculate_snr(new_power, new_data_rate, vehicle_density)
-            
-            # Calculate CBR based on updated parameters
-            new_cbr = self.calculate_cbr(new_power, new_data_rate, new_beacon_rate, vehicle_density)
-            
-            # Update the state
-            next_state = np.array([new_power, new_data_rate, new_beacon_rate, vehicle_density, new_snr])
-            next_states.append(next_state)
-            
-            # Calculate the reward based on CBR and SNR
-            reward = self.reward_function(new_cbr, new_snr)
-            rewards.append(reward)
-        
-        # Set the new state
-        self.state = next_states
-        
-        # In a simple scenario, assume the episode ends after each step
-        done = True  
-        return next_states, rewards, [done] * self.num_agents, {}
- 
-    def _get_initial_state(self):
-        # Initialize the state from car logs
-        log = np.random.choice(self.car_logs)
-        return np.array([log['power_transmission'], log['data_rate'], log['beacon_rate'], log['vehicle_density'], log['snr']])
-    
-    def calculate_snr(self, power, data_rate, vehicle_density):
-        # Placeholder: SNR calculation considering interference from neighbors
-        interference = vehicle_density * np.random.uniform(0.5, 1.5)  # Simulate interference effect
-        snr = power / (interference + 1e-9)  # Simple SNR model
-        return snr
-    
-    def calculate_cbr(self, power, data_rate, beacon_rate, vehicle_density):
-        # Placeholder: CBR calculation considering current state
-        return np.random.uniform(0.4, 0.8)  # Simulated CBR for demonstration
-    
-    def reward_function(self, cbr, snr):
-        # Reward function that penalizes deviations from target CBR and SNR
-        cbr_deviation = abs(cbr - self.CBR_target)
-        snr_deviation = abs(snr - self.SNR_target)
-        
-        # Combine penalties for both CBR and SNR
-        reward = - (cbr_deviation + snr_deviation)
-        return reward
- 
-# Define the MADDPG Agent and Training Process
-class MultiAgentTrainer:
-    def __init__(self, env, num_agents=3, gamma=0.95, tau=0.01, lr=0.01):
-        self.env = env
-        self.maddpg = MADDPG(num_agents, env.observation_space, env.action_space, gamma=gamma, tau=tau, lr=lr)
-        
-    def train(self, num_episodes=1000):
-        for episode in range(num_episodes):
-            state = self.env.reset()
-            total_reward = np.zeros(self.env.num_agents)
-            
-            done = False
-            while not done:
-                actions = self.maddpg.select_action(state)
-                next_state, rewards, done, _ = self.env.step(actions)
-                
-                self.maddpg.memory.push(state, actions, rewards, next_state, done)
-                self.maddpg.update()
-                
-                state = next_state
-                total_reward += rewards
-            
-            print(f"Episode {episode} - Total Reward: {total_reward}")
-            if episode % 100 == 0:
-                self.maddpg.save_checkpoint()
- 
-    def evaluate(self):
-        state = self.env.reset()
-        done = False
-        total_reward = np.zeros(self.env.num_agents)
-        
-        while not done:
-            actions = self.maddpg.select_action(state, noise=False)
-            next_state, rewards, done, _ = self.env.step(actions)
-            state = next_state
-            total_reward += rewards
-        
-        print(f"Evaluation - Total Reward: {total_reward}")
- 
-# Main function to train and evaluate the MADDPG agents
-def main():
-    car_logs = [{'power_transmission': 10, 'data_rate': 20, 'beacon_rate': 5, 'vehicle_density': 0.5, 'snr': 20}] * 100  # Dummy logs
-    env = VANETEnv(car_logs)
-    trainer = MultiAgentTrainer(env)
-    trainer.train()
-    trainer.evaluate()
- 
-if __name__ == "__main__":
-    main()
+import logging
+from collections import deque
 
+# Configure logging
+logging.basicConfig(level=logging.DEBUG,  # Set the logging level to DEBUG
+                    format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+# Constants
+HOST = '127.0.0.1'
+PORT = 5000
+CBR_TARGET = 0.65
+LEARNING_RATE = 0.01
+DISCOUNT_FACTOR = 0.99
+EPSILON = 0.1  # Exploration rate (though SAC doesn't use epsilon like Q-learning)
+
+# Simplified state discretization
+POWER_BINS = [5, 15, 25, 30]
+BEACON_BINS = [1, 5, 10, 20]
+CBR_BINS = [0.0, 0.3, 0.6, 1.0]
+
+# SAC-specific constants
+BATCH_SIZE = 64
+BUFFER_SIZE = 100000
+TAU = 0.005  # Target network update rate
+
+# Experience Replay Buffer for SAC
+class ReplayBuffer:
+    def __init__(self, capacity):
+        self.buffer = deque(maxlen=capacity)
+
+    def push(self, state, action, reward, next_state, done):
+        self.buffer.append((state, action, reward, next_state, done))
+
+    def sample(self):
+        idx = np.random.choice(len(self.buffer), BATCH_SIZE)
+        batch = [self.buffer[i] for i in idx]
+        return zip(*batch)
+
+    def size(self):
+        return len(self.buffer)
+
+# Define Actor and Critic Networks for SAC
+class Actor(nn.Module):
+    def __init__(self, input_dim, output_dim):
+        super(Actor, self).__init__()
+        self.fc1 = nn.Linear(input_dim, 128)
+        self.fc2 = nn.Linear(128, 64)
+        self.fc3 = nn.Linear(64, output_dim)  # Output size is 4 for 4 discrete actions
+
+    def forward(self, state):
+        x = torch.relu(self.fc1(state))
+        x = torch.relu(self.fc2(x))
+        logits = self.fc3(x)  # Output raw scores (logits)
+        return logits  # No activation function (softmax will be applied during action selection)
+
+class Critic(nn.Module):
+    def __init__(self, input_dim, action_dim):
+        super(Critic, self).__init__()
+        self.fc1 = nn.Linear(input_dim + action_dim, 128)
+        self.fc2 = nn.Linear(128, 64)
+        self.fc3 = nn.Linear(64, 1)
+
+    def forward(self, state, action):
+        x = torch.cat([state, action], dim=-1)
+        x = torch.relu(self.fc1(x))
+        x = torch.relu(self.fc2(x))
+        return self.fc3(x)
+
+class SAC:
+    def __init__(self, state_dim, action_dim, gamma=0.99, learning_rate=LEARNING_RATE):
+        self.actor = Actor(state_dim, action_dim).float()
+        self.critic1 = Critic(state_dim, action_dim).float()
+        self.critic2 = Critic(state_dim, action_dim).float()
+        self.target_critic1 = Critic(state_dim, action_dim).float()
+        self.target_critic2 = Critic(state_dim, action_dim).float()
+        self.target_critic1.load_state_dict(self.critic1.state_dict())
+        self.target_critic2.load_state_dict(self.critic2.state_dict())
+
+        self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=learning_rate)
+        self.critic1_optimizer = optim.Adam(self.critic1.parameters(), lr=learning_rate)
+        self.critic2_optimizer = optim.Adam(self.critic2.parameters(), lr=learning_rate)
+
+        self.replay_buffer = ReplayBuffer(BUFFER_SIZE)
+        self.gamma = gamma
+        self.tau = TAU
+        self.entropy_coef = 0.2  # Regularization term
+
+        self.action_map = {
+            0: "increase beacon rate",
+            1: "decrease beacon rate",
+            2: "increase power transmission",
+            3: "decrease power transmission"
+        }
+    
+    def select_action(self, state):
+        state_tensor = torch.tensor(state, dtype=torch.float32).unsqueeze(0)
+        logits = self.actor(state_tensor)  # Get raw logits
+        prob_dist = torch.softmax(logits, dim=-1)  # Apply softmax to get probabilities
+        logger.debug(f"Logits: {logits}, Probabilities: {prob_dist}")  # Log logits and probabilities
+        action_int = torch.multinomial(prob_dist, 1).item()  # Sample action based on probabilities
+        action_str = self.action_map[action_int]  # Map the integer action to the corresponding string action
+        return action_str
+
+
+    def update(self):
+        if self.replay_buffer.size() < BATCH_SIZE:
+            logger.debug("Replay buffer too small to update.")
+            return
+
+        states, actions, rewards, next_states, dones = self.replay_buffer.sample()
+        actions = np.array(actions)
+
+        states = torch.tensor(states, dtype=torch.float32)
+        actions = torch.tensor(actions, dtype=torch.float32)
+        rewards = torch.tensor(rewards, dtype=torch.float32).unsqueeze(1)
+        next_states = torch.tensor(next_states, dtype=torch.float32)
+        dones = torch.tensor(dones, dtype=torch.float32).unsqueeze(1)
+
+        # Critic loss
+        next_action = self.actor(next_states)
+        next_q1 = self.target_critic1(next_states, next_action)
+        next_q2 = self.target_critic2(next_states, next_action)
+        next_q = torch.min(next_q1, next_q2)
+        target_q = rewards + self.gamma * (1 - dones) * next_q
+
+        q1 = self.critic1(states, actions)
+        q2 = self.critic2(states, actions)
+        critic1_loss = torch.mean((q1 - target_q) ** 2)
+        critic2_loss = torch.mean((q2 - target_q) ** 2)
+
+        # Actor loss (maximize the Q-values)
+        action = self.actor(states)
+        q1 = self.critic1(states, action)
+        q2 = self.critic2(states, action)
+        min_q = torch.min(q1, q2)
+        actor_loss = -torch.mean(min_q - self.entropy_coef * action)
+        
+        logger.debug(f"Critic1 Loss: {critic1_loss.item()}, Critic2 Loss: {critic2_loss.item()}, Actor Loss: {actor_loss.item()}")
+
+        # Update critics
+        self.critic1_optimizer.zero_grad()
+        critic1_loss.backward(retain_graph=True)
+        self.critic1_optimizer.step()
+
+        self.critic2_optimizer.zero_grad()
+        critic2_loss.backward(retain_graph=True)
+        self.critic2_optimizer.step()
+
+        # Update actor
+        self.actor_optimizer.zero_grad()
+        actor_loss.backward()
+        self.actor_optimizer.step()
+
+        # Soft target network update
+        self._soft_update(self.target_critic1, self.critic1)
+        self._soft_update(self.target_critic2, self.critic2)
+
+        logger.debug("Network update complete.")
+        
+    def _soft_update(self, target, source):
+        for target_param, source_param in zip(target.parameters(), source.parameters()):
+            target_param.data.copy_(self.tau * source_param.data + (1.0 - self.tau) * target_param.data)
+
+# QLearningServer for multi-agent SAC environment communication
+class SACServer:
+    def __init__(self):
+        self.server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.server.bind((HOST, PORT))
+        self.server.listen(1)
+        self.agent = SAC(3, 1)  # Example dimensions: 3 for state (power, beacon, cbr), 1 for action (increase or decrease)
+    
+    def handle_client(self, conn):
+        while True:
+            data = conn.recv(1024)
+            if not data:
+                logger.info("No data received, closing connection.")
+                break
+            try:
+                state = json.loads(data.decode())
+                logger.debug(f"Received state from client: {state}")
+                current_power = state['power_transmission']
+                current_beacon = state['beacon_rate']
+                current_cbr = state['channel_busy_rate']
+            
+                # Select action
+                action = self.agent.select_action([current_power, current_beacon, current_cbr])
+                logger.debug(f"Selected Action: {action}")
+            
+                # Implement action
+                if action == "increase beacon rate":
+                    new_beacon = min(20, current_beacon + 1)
+                    new_power = current_power
+                elif action == "decrease beacon rate":
+                    new_beacon = max(1, current_beacon - 1)
+                    new_power = current_power
+                elif action == "increase power tx":
+                    new_power = min(30, current_power + 1)
+                    new_beacon = current_beacon
+                elif action == "decrease power tx":
+                    new_power = max(5, current_power - 1)
+                    new_beacon = current_beacon
+            
+                # Reward calculation
+                reward = -abs(current_cbr - CBR_TARGET)
+            
+                # Store experience and update SAC
+                self.agent.replay_buffer.push(
+                    [current_power, current_beacon, current_cbr],
+                    action,
+                    reward,
+                    [new_power, new_beacon, current_cbr],
+                    done=False
+                )
+                self.agent.update()
+
+                # Send action to client
+                response = {
+                    'power_transmission': new_power,
+                    'beacon_rate': new_beacon,
+                    'reward': reward
+                }
+                conn.send(json.dumps(response).encode())
+                logger.debug(f"Sent response to client: {response}")
+            except Exception as e:
+                logger.error(f"Error: {e}")
+                break
+
+    def start(self):
+        while True:
+            logger.info(f"Server listening on {HOST}:{PORT}")
+            conn, addr = self.server.accept()
+            logger.info(f"Connected: {addr}")
+            self.handle_client(conn)
+            conn.close()
+
+if __name__ == "__main__":
+    server = SACServer()
+    server.start()
