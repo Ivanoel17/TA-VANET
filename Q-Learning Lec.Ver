@@ -1,0 +1,102 @@
+# Constants
+HOST = '127.0.0.1'
+PORT = 5000
+CBR_TARGET = 0.65
+LEARNING_RATE = 0.1
+DISCOUNT_FACTOR = 0.99
+EPSILON = 0.1  # Fixed exploration rate
+
+# Simplified state discretization
+POWER_BINS = [5, 15, 25, 30]
+BEACON_BINS = [1, 5, 10, 20]
+CBR_BINS = [0.0, 0.3, 0.6, 1.0]
+
+# Initialize Q-table
+q_table = np.zeros((len(POWER_BINS), (len(BEACON_BINS)), (len(CBR_BINS)), 2))
+
+def discretize(value, bins):
+    return np.digitize(value, bins) - 1
+
+class QLearningServer:
+    def _init_(self):
+        self.server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.server.bind((HOST, PORT))
+        self.server.listen(1)
+        print(f"Server listening on {HOST}:{PORT}")
+
+    def calculate_reward(self, cbr):
+        return -abs(cbr - CBR_TARGET) * 100  # Simple reward based on CBR deviation
+
+    def select_action(self, state):
+        power_idx = discretize(state[0], POWER_BINS)
+        beacon_idx = discretize(state[1], BEACON_BINS)
+        cbr_idx = discretize(state[2], CBR_BINS)
+        
+        if random.random() < EPSILON:
+            return random.choice([0, 1])  # 0: decrease, 1: increase
+        return np.argmax(q_table[power_idx, beacon_idx, cbr_idx])
+
+    def update_q_table(self, state, action, reward, new_state):
+        old_idx = discretize(state[0], POWER_BINS), discretize(state[1], BEACON_BINS), discretize(state[2], CBR_BINS)
+        new_idx = discretize(new_state[0], POWER_BINS), discretize(new_state[1], BEACON_BINS), discretize(new_state[2], CBR_BINS)
+        
+        old_q = q_table[old_idx + (action,)]
+        max_new_q = np.max(q_table[new_idx])
+        q_table[old_idx + (action,)] = old_q + LEARNING_RATE * (reward + DISCOUNT_FACTOR * max_new_q - old_q)
+
+    def handle_client(self, conn):
+        while True:
+            data = conn.recv(1024)
+            if not data:
+                break
+            
+            try:
+                state = json.loads(data.decode())
+                print(f"Received: {state}")
+                
+                # Current parameters
+                current_power = state['power']
+                current_beacon = state['beacon']
+                current_cbr = state['cbr']
+                
+                # Select action
+                action = self.select_action((current_power, current_beacon, current_cbr))
+                
+                # Determine new values
+                new_power = max(5, min(30, current_power + (-1 if action == 0 else 1))
+                new_beacon = max(1, min(20, current_beacon + (-1 if action == 0 else 1))
+                
+                # Calculate reward
+                reward = self.calculate_reward(current_cbr)
+                
+                # Update Q-table
+                self.update_q_table(
+                    (current_power, current_beacon, current_cbr),
+                    action,
+                    reward,
+                    (new_power, new_beacon, current_cbr)
+                )
+                
+                # Send response
+                response = {
+                    'power': new_power,
+                    'beacon': new_beacon,
+                    'reward': reward
+                }
+                conn.send(json.dumps(response).encode())
+                print(f"Sent: {response}")
+                
+            except Exception as e:
+                print(f"Error: {e}")
+                break
+
+    def start(self):
+        while True:
+            conn, addr = self.server.accept()
+            print(f"Connected: {addr}")
+            self.handle_client(conn)
+            conn.close()
+
+if _name_ == "_main_":
+    server = QLearningServer()
+    server.start()
